@@ -4,7 +4,7 @@
 from scipy.stats import gamma
 
 import rospy
-from occurence_learning.trajectory_region_knowledge import TrajectoryRegionKnowledge
+from occurrence_learning.trajectory_region_knowledge import TrajectoryRegionKnowledge
 
 
 class Lambda(object):
