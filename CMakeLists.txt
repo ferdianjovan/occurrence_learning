@@ -4,7 +4,8 @@ project(occurrence_learning)
 find_package(catkin REQUIRED COMPONENTS
   tf
   rospy
-  human_trajectory
+  std_msgs
+  message_generation
   soma_geospatial_store
 )
 
@@ -14,12 +15,10 @@ catkin_python_setup()
 ## Declare ROS messages, services and actions ##
 ################################################
 
-## Generate messages in the 'msg' folder
-# add_message_files(
-#   FILES
-#   Message1.msg
-#   Message2.msg
-# )
+add_message_files(
+  FILES
+  OccurrenceRate.msg
+)
 
 ## Generate services in the 'srv' folder
 # add_service_files(
@@ -35,11 +34,10 @@ catkin_python_setup()
 #   Action2.action
 # )
 
-## Generate added messages and services with any dependencies listed here
-# generate_messages(
-#   DEPENDENCIES
-#   std_msgs
-# )
+generate_messages(
+  DEPENDENCIES
+  std_msgs
+)
 
 ###################################
 ## catkin specific configuration ##
@@ -48,7 +46,7 @@ catkin_python_setup()
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES poisson_stuff
-  CATKIN_DEPENDS tf rospy human_trajectory soma_geospatial_store 
+  CATKIN_DEPENDS tf rospy std_msgs message_runtime soma_geospatial_store 
 #  DEPENDS system_lib
 )
 

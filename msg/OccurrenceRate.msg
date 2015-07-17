@@ -1,0 +1,11 @@
+string soma
+string soma_config
+string region_id
+int32 day
+int32 hour
+int32 start_minute
+int32 end_minute
+float32 occurrence_shape 
+float32 occurrence_scale 
+float32 occurrence_rate 
+string periodic_type 
