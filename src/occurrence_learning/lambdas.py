@@ -109,14 +109,6 @@ class Lambdas(object):
                 hourly_lambda.append(temp)
             daily_lambda.update({j: hourly_lambda})
         self.lambdas.update({reg: daily_lambda})
-        # self.lambdas = {i: {j: list() for j in periodic_days} for i in regions}
-        # for reg, daily_lambda in self.lambdas.iteritems():
-        #     for day, hourly_lambda in daily_lambda.iteritems():
-        #         for i in range(24):
-        #             temp = {
-        #                 i*interval: Lambda(interval/float(60)) for i in range(1, (60/interval)+1)
-        #             }
-        #             hourly_lambda.append(temp)
 
     # store the occurrence rate in database
     def store_lambdas(self, soma, soma_config):
@@ -153,10 +145,10 @@ class Lambdas(object):
 
 
 if __name__ == '__main__':
-    rospy.init_node("lambdas_test")
+    rospy.init_node("occurrence_rate_learning")
     interval = 20
     trk = TrajectoryRegionKnowledge("rwth", "rwth_novelty", interval)
-    # trk = TrajectoryRegionKnowledge("g4s", "g4s_test")
+    # trk = TrajectoryRegionKnowledge("g4s", "g4s_test", interval)
     reg_trajs = trk.estimate_trajectories_weekly(6, 2015)
     # reg_trajs = trk.estimate_trajectories_weekly(5, 2015)
 
