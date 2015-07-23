@@ -100,6 +100,7 @@ class TrajectoryRegionKnowledge(object):
             roi_region_daily = self.region_knowledge.calculate_region_observation_duration(
                 days, self.minute_interval
             )
+            self.region_knowledge.store_to_mongo()
         else:
             roi_region_daily = roi_region_daily[0]
         trajectory_region_daily = self.obtain_number_of_trajectories(days)
