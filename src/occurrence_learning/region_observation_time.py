@@ -48,6 +48,7 @@ class RegionObservationTimeManager(object):
         """
         roi_region_daily = dict()
         total_duration = 0
+        self.minute_interval = minute_interval
         for i in days:
             end_date = i + datetime.timedelta(hours=24)
             rospy.loginfo(
@@ -76,9 +77,10 @@ class RegionObservationTimeManager(object):
                 roi_reg_hourly[log[0].region_id][end.hour][end.minute+1] = log[0].duration.secs
                 total_duration += log[0].duration.secs
             roi_region_daily.update({i.day: roi_reg_hourly})
+        self.region_observation_duration = roi_region_daily
         return roi_region_daily, total_duration
 
-    def store_to_mongo(self, data=dict()):
+    def store_to_mongo(self):
         """
             Store region observation time from self.region_observation_duration to mongodb.
             It will store soma map, soma configuration, region_id, the starting and end time where
@@ -86,9 +88,13 @@ class RegionObservationTimeManager(object):
             the interval.
         """
         rospy.loginfo("Storing region observation time to region_observation_time collection...")
-        if data == dict():
-            data = self.region_observation_duration
-        minute_interval = 60 / len(data.values()[0].values()[0][0])
+        data = self.region_observation_duration
+        try:
+            minute_interval = self.minute_interval
+        except:
+            rospy.logwarn("Minute interval is not defined, please call either load_from_mongo or calculate_region_observation_duration first")
+            return
+
         for day, daily_data in data.iteritems():
             for reg, reg_data in daily_data.iteritems():
                 for hour, hourly_data in enumerate(reg_data):
@@ -129,6 +135,7 @@ class RegionObservationTimeManager(object):
         """
         rospy.loginfo('Calculation region observation duration...')
         roi_region_daily = dict()
+        self.minute_interval = minute_interval
 
         for i in days:
             end_date = i + datetime.timedelta(hours=24)
