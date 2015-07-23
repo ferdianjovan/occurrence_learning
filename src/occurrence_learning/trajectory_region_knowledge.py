@@ -5,27 +5,10 @@ import datetime
 import calendar
 
 import rospy
-import pymongo
-from tf.transformations import euler_from_quaternion
 from soma_geospatial_store.geospatial_store import GeoSpatialStoreProxy
+from occurrence_learning.region_observation_time import RegionObservationTimeManager
 
 
-def robot_view_cone(Px, Py, yaw):
-    """
-        let's call the triangle PLR, where P is the robot pose,
-        L the left vertex, R the right vertex
-    """
-    d = 4       # max monitored distance: reasonably not more than 3.5-4m
-    alpha = 1   # field of view: 57 deg kinect, 58 xtion, we can use exactly 1 rad (=57.3 deg)
-    Lx = Px + d * (math.cos((yaw-alpha)/2))
-    Ly = Py + d * (math.cos((yaw-alpha)/2))
-    Rx = Px + d * (math.cos((yaw+alpha)/2))
-    Ry = Py + d * (math.cos((yaw+alpha)/2))
-    return [[Lx, Ly], [Rx, Ry], [Px, Py]]
-
-
-# assuming the first week of the month starts with the first monday of the month
-# if the month starts on any other day, then the first week will start from 0
 def week_of_month(tgtdate):
     """
         Assuming the first week of the month starts with the first monday of the month.
@@ -44,119 +27,33 @@ def week_of_month(tgtdate):
 class TrajectoryRegionKnowledge(object):
 
     def __init__(self, soma_map, soma_config, minute_interval=60):
-        self.monthly_trajectory_est = dict()
         self.soma_map = soma_map
         self.soma_config = soma_config
         self.minute_interval = minute_interval
+        self.region_knowledge = RegionObservationTimeManager(soma_map, soma_config)
         # Service and Proxy
         rospy.loginfo("Connecting to geospatial_store and roslog database...")
         self.gs = GeoSpatialStoreProxy('geospatial_store', 'soma')
-        # self.roslog = GeoSpatialStoreProxy("roslog", "robot_pose")
-        self.roslog = pymongo.MongoClient(
-            rospy.get_param("mongodb_host", "localhost"),
-            rospy.get_param("mongodb_port", 62345)
-        ).roslog.robot_pose
 
-    # get regional knowledge for each hour every day
-    def obtain_regional_knowledge(self, days):
-        """
-            Returns the ROIs the robot has monitor at each logged robot pose
-            for particular days
-        """
-        rospy.loginfo('Getting region knowledge from roslog...')
-        roi_region_daily = dict()
-        for i in days:
-            end_date = i + datetime.timedelta(hours=24)
-            roi_region_hourly = self._obtain_regional_knowledge(i, end_date, self.minute_interval)
-            roi_region_daily.update({i.day: roi_region_hourly})
-        return roi_region_daily
-
-    # hidden function for the obtain_regional_knowledge function
-    def _obtain_regional_knowledge(self, start_date, end_date, minute_interval=60):
-        sampling_rate = 10
-        min_in_hour = 60
-        roi_temp_list = dict()
-        rospy.loginfo("Querying from " + str(start_date) + " to " + str(end_date))
-
-        query = {
-            "_id": {"$exists": "true"},
-            "_meta.inserted_at": {"$gte": start_date, "$lt": end_date}
-        }
-
-        for i, pose in enumerate(self.roslog.find(query)):
-            if i % sampling_rate == 0:
-                _, _, yaw = euler_from_quaternion(
-                    [0, 0, pose['orientation']['z'], pose['orientation']['w']]
-                )
-                coords = robot_view_cone(pose['position']['x'], pose['position']['y'], yaw)
-                langitude_latitude = list()
-                for pt in coords:
-                    langitude_latitude.append(self.gs.coords_to_lnglat(pt[0], pt[1]))
-                langitude_latitude.append(self.gs.coords_to_lnglat(coords[0][0], coords[0][1]))
-
-                for j in self.gs.observed_roi(langitude_latitude, self.soma_map, self.soma_config):
-                    region = str(j['soma_roi_id'])
-                    hour = pose['_meta']['inserted_at'].time().hour
-                    minute = pose['_meta']['inserted_at'].time().minute
-
-                    # Region Knowledge per hour. Bin them by hour and minute_interval.
-                    if region not in roi_temp_list:
-                        temp = list()
-                        for i in range(24):
-                            group_mins = {
-                                i*minute_interval: 0 for i in range(1, (min_in_hour/minute_interval)+1)
-                            }
-                            temp.append(group_mins)
-                        roi_temp_list[region] = temp
-                    group_min = minute_interval
-                    while minute >= group_min:
-                        group_min += minute_interval
-                    roi_temp_list[region][hour][group_min] += 1
-
-        roi_temp_list = self._normalizing_region_knowledge(roi_temp_list, sampling_rate)
-        rospy.loginfo("Region knowledge for the query is " + str(roi_temp_list))
-        return roi_temp_list
-
-    # checking if all the region knowledge is capped by 3600 (total seconds).
-    # if it is not, then normalizing is applied
-    def _normalizing_region_knowledge(self, roi_temp_list, sampling_rate):
-        for reg, hourly_poses in roi_temp_list.iteritems():
-            _hourly_poses = list()
-            for minute_poses in hourly_poses:
-                _hourly_poses.append(sum([i for i in minute_poses.itervalues()]))
-            max_hourly_poses = max(_hourly_poses)
-            normalizing = False
-            for ind, seconds in enumerate(_hourly_poses):
-                if seconds > 3601:
-                    normalizing = True
-                    rospy.logwarn(
-                        "The number of seconds robot being in %s in hour %d is greater than 3600 with sampling %d" %
-                        (reg, ind, sampling_rate)
-                    )
-                    rospy.logwarn("Normalizing the number of seconds")
-                    break
-            if normalizing:
-                for ind, val in enumerate(hourly_poses):
-                    for minute, seconds in val.iteritems():
-                        roi_temp_list[reg][ind][minute] = 3600 / float(max_hourly_poses) * seconds
-        return roi_temp_list
-
-    # estimate the number of trajectories in a region hourly each day for a
-    # month assuming that the robot sees the complete region when it sees the region
     def estimate_trajectories_monthly(self, month=1, year=2015):
+        """
+            Estimate the number of trajectories in a region hourly each day for a
+            month assuming that the robot sees the complete region when it sees the region
+        """
         days_of_month = [
             datetime.datetime(year, month, i, 0, 0) for i in range(
                 1, calendar.monthrange(year, month)[1]+1
             )
         ]
         monthly_trajectories = self.estimate_trajectories(days_of_month)
-        self.monthly_trajectory_est = monthly_trajectories
         return monthly_trajectories
 
-    # estimate the number of trajectories in a region for a month, split by
-    # weeks assuming that the robot sees the complete region when it sees the
-    # region
     def estimate_trajectories_weekly(self, month=1, year=2015):
+        """
+            Estimate the number of trajectories in a region for a month, split by
+            weeks assuming that the robot sees the complete region when it sees the
+            region
+        """
         monthly_traj = self.estimate_trajectories_monthly(month, year)
         month_weekly_traj = list()
 
@@ -191,8 +88,20 @@ class TrajectoryRegionKnowledge(object):
         return month_weekly_traj
 
     def estimate_trajectories(self, days):
+        """
+            Estimate the number of trajectories in a region for days,
+            assuming that the robot sees the complete region when it sees the region
+        """
         days_trajectories = dict()
-        roi_region_daily = self.obtain_regional_knowledge(days)
+        roi_region_daily = self.region_knowledge.load_from_mongo(
+            days, self.minute_interval
+        )
+        if roi_region_daily[1] == 0:
+            roi_region_daily = self.region_knowledge.calculate_region_observation_duration(
+                days, self.minute_interval
+            )
+        else:
+            roi_region_daily = roi_region_daily[0]
         trajectory_region_daily = self.obtain_number_of_trajectories(days)
 
         for day, dly_traj in trajectory_region_daily.iteritems():
@@ -226,14 +135,17 @@ class TrajectoryRegionKnowledge(object):
                         rospy.logwarn(
                             "%d trajectories are detected in region %s at day %d hour %d, but no info about robot being there" % (traj, reg, day, hour)
                         )
-                    # days_trajectories[reg][day][hour][mins] = -1
             except:
                 rospy.logwarn("No info about robot on day %d" % day)
 
         return days_trajectories
 
-    # trajectories = [day[hour[region]]]
     def obtain_number_of_trajectories(self, days):
+        """
+            Obtaining the number of trajectories for each day in argument days,
+            The number of Trajectories will be split into day, hour, region, and minutes.
+            Trajectories = [day[hour[region[minutes]]]]
+        """
         rospy.loginfo('Updating frequency of trajectories in each region...')
         trajectory_region_daily = dict()
         for i in days:
@@ -268,11 +180,11 @@ class TrajectoryRegionKnowledge(object):
         )
         return trajectories_hourly
 
-    # count the number of trajectories in areas defined by soma map and soma
-    # config that is restricted by the query.
-    # this function aims to reduce the processing time if we compare with using
-    # trajectory query service.
     def _get_num_traj_by_epoch(self, start, end, min_inter=3600):
+        """
+            Count the number of trajectories in areas defined by soma map and soma
+            config that is restricted by the query.
+        """
         start_hour = start
         end_hour = start + min_inter
         trajectories_hourly = dict()
@@ -319,11 +231,10 @@ if __name__ == '__main__':
     days = [
         # datetime.datetime(2015, 6, 27, 0, 0),
         datetime.datetime(2015, 6, 28, 0, 0),
-        # datetime.datetime(2015, 6, 29, 0, 0)
+        datetime.datetime(2015, 6, 29, 0, 0)
         # datetime.datetime(2015, 5, 6, 0, 0)
     ]
     # dk = TrajectoryRegionKnowledge("g4s", "g4s_test")
     dk = TrajectoryRegionKnowledge("rwth", "rwth_novelty", 20)
-    # print dk.obtain_regional_knowledge(days)
     # print dk.obtain_number_of_trajectories(days)
     print dk.estimate_trajectories(days)

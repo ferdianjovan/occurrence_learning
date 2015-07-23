@@ -18,6 +18,7 @@ catkin_python_setup()
 add_message_files(
   FILES
   OccurrenceRate.msg
+  RegionObservationTime.msg
 )
 
 ## Generate services in the 'srv' folder
