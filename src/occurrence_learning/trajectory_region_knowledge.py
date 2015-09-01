@@ -64,7 +64,7 @@ class TrajectoryRegionKnowledge(object):
         )
         if first_week == 0:
             end_week += 1
-        for i in range(end_week):
+        for l in range(end_week):
             # create a template of weekly trajectory in the form {region{day[hour{mins}]}}
             weekly_traj = {
                 i: {
@@ -80,7 +80,7 @@ class TrajectoryRegionKnowledge(object):
         for reg, dly_traj in monthly_traj.iteritems():
             for day, hourly_traj in dly_traj.iteritems():
                 th_week = week_of_month(datetime.date(year, month, day))
-                if first_week == 0:
+                if first_week == 1:
                     th_week -= 1
                 week_day = datetime.date(year, month, day).weekday()
                 month_weekly_traj[th_week][reg][week_day] = hourly_traj
@@ -93,51 +93,85 @@ class TrajectoryRegionKnowledge(object):
             assuming that the robot sees the complete region when it sees the region
         """
         days_trajectories = dict()
-        roi_region_daily = self.region_knowledge.load_from_mongo(
+        roi_region_daily = self.region_knowledge.calculate_region_observation_duration(
             days, self.minute_interval
         )
-        if roi_region_daily[1] == 0:
-            roi_region_daily = self.region_knowledge.calculate_region_observation_duration(
-                days, self.minute_interval
-            )
-            self.region_knowledge.store_to_mongo()
-        else:
-            roi_region_daily = roi_region_daily[0]
         trajectory_region_daily = self.obtain_number_of_trajectories(days)
 
-        for day, dly_traj in trajectory_region_daily.iteritems():
-            for hour, reg_traj in enumerate(dly_traj):
-                for reg, mins_traj in reg_traj.iteritems():
-                    days_trajectories = self._estimate_trajectories_by_minutes(
-                        mins_traj, day, hour, reg, days_trajectories, roi_region_daily
-                    )
+        query = {
+            "soma_map": self.soma_map, "soma_config": self.soma_config,
+            "soma_roi_id": {"$exists": True}
+        }
+        regions = self.gs.find_projection(query, {"soma_roi_id": 1})
+        minutes = [
+            i * self.minute_interval for i in range(1, (60/self.minute_interval) + 1)
+        ]
+        for region in regions:
+            reg = region['soma_roi_id']
+            for day in days:
+                day = day.day
+                if not(day in roi_region_daily and day in trajectory_region_daily):
+                    continue
+                if reg not in days_trajectories:
+                    days_trajectories[reg] = dict()
+                if day not in days_trajectories[reg]:
+                    temp = list()
+                    for i in range(24):
+                        temp.append({i: -1 for i in minutes})
+                    days_trajectories[reg][day] = temp
+                for hour in range(24):
+                    for minute in minutes:
+                        if reg in roi_region_daily[day]:
+                            days_trajectories = self._estimate_trajectories_by_minutes(
+                                reg, day, hour, minute, days_trajectories,
+                                roi_region_daily[day], trajectory_region_daily[day]
+                            )
+
         return days_trajectories
 
-    # helper function for estimate_trajectories, because that func is too complex
     def _estimate_trajectories_by_minutes(
-        self, mins_traj, day, hour, reg, days_trajectories, roi_region_daily
+        self, region, day, hour, minute, days_trajectories, rois_day, trajectories_day
     ):
-        for mins, traj in mins_traj.iteritems():
-            if reg not in days_trajectories:
-                days_trajectories[reg] = dict()
-            if day not in days_trajectories[reg]:
-                min_keys = mins_traj.keys()
-                temp = list()
-                for i in range(24):
-                    temp.append({i: -1 for i in min_keys})
-                days_trajectories[reg][day] = temp
-
-            try:
-                if roi_region_daily[day][reg][hour][mins] != 0:
-                    multi_est = 3600 / float(len(mins_traj) * roi_region_daily[day][reg][hour][mins])
-                    days_trajectories[reg][day][hour][mins] = math.ceil(multi_est * traj)
-                else:
-                    if traj > 0:
-                        rospy.logwarn(
-                            "%d trajectories are detected in region %s at day %d hour %d, but no info about robot being there" % (traj, reg, day, hour)
+        minutes = [
+            i * self.minute_interval for i in range(1, (60/self.minute_interval) + 1)
+        ]
+        if len(trajectories_day) > hour:
+            if region in trajectories_day[hour]:
+                if minute in trajectories_day[hour][region]:
+                    traj = trajectories_day[hour][region][minute]
+                    if rois_day[region][hour][minute] > 0:
+                        multi_est = 3600 / float(
+                            len(minutes) * rois_day[region][hour][minute]
                         )
-            except:
-                rospy.logwarn("No info about robot on day %d" % day)
+                        days_trajectories[region][day][hour][minute] = math.ceil(
+                            multi_est * traj
+                        )
+                    else:
+                        if traj > 0:
+                            rospy.logwarn(
+                                "%d trajectories are detected in region %s at day %d hour %d minute %d, but no info about robot being there" % (
+                                    traj, region, day, hour, minute
+                                )
+                            )
+                else:
+                    if rois_day[region][hour][minute] >= self.minute_interval * 60:
+                        days_trajectories[region][day][hour][minute] = 0
+            else:
+                for i in minutes:
+                    if rois_day[region][hour][i] >= self.minute_interval * 60:
+                        days_trajectories[region][day][hour][i] = 0
+        else:
+            query = {
+                "soma_map": self.soma_map, "soma_config": self.soma_config,
+                "soma_roi_id": {"$exists": True}
+            }
+            regions = self.gs.find_projection(query, {"soma_roi_id": 1})
+            for j in regions:
+                reg = j['soma_roi_id']
+                if reg in rois_day and hour in rois_day[reg]:
+                    for i in minutes:
+                        if i in rois_day[reg][hour] and rois_day[reg][hour][i] >= self.minute_interval * 60:
+                            days_trajectories[reg][day][hour][i] = 0
 
         return days_trajectories
 
@@ -229,13 +263,17 @@ class TrajectoryRegionKnowledge(object):
 
 if __name__ == '__main__':
     rospy.init_node("trk_test")
+    interval = 20
+    trk = TrajectoryRegionKnowledge("g4s", "g4s_novelty", interval)
+
     days = [
-        # datetime.datetime(2015, 6, 27, 0, 0),
-        datetime.datetime(2015, 6, 28, 0, 0),
-        datetime.datetime(2015, 6, 29, 0, 0)
-        # datetime.datetime(2015, 5, 6, 0, 0)
+        datetime.datetime(2015, 5, 1, 0, 0)  # 740 trajectories dengan 55 entries for region_observation_time
+        # 105 trajectories are detected where robot is in the region within 13
+        # entries of region_observation_time
+        # 602 trajectories are detected where robot is not in the region
+        # 42 robot was there but no trajectories
+        # jam di region_observation_time itu gmt but dst.
     ]
-    # dk = TrajectoryRegionKnowledge("g4s", "g4s_test")
-    dk = TrajectoryRegionKnowledge("rwth", "rwth_novelty", 20)
-    # print dk.obtain_number_of_trajectories(days)
-    print dk.estimate_trajectories(days)
+    # print trk.obtain_number_of_trajectories(days)
+    # reg_trajs = trk.estimate_trajectories_weekly(5, 2015)
+    print trk.estimate_trajectories(days)

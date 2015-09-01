@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 
+import sys
 import time
 import math
 import datetime
+import calendar
 
 import rospy
 import pymongo
@@ -138,9 +140,13 @@ class RegionObservationTimeManager(object):
         self.minute_interval = minute_interval
 
         for i in days:
-            end_date = i + datetime.timedelta(hours=24)
-            roi_region_hourly = self._get_robot_region_stay_duration(i, end_date, minute_interval)
-            roi_region_daily.update({i.day: roi_region_hourly})
+            loaded_roi_reg_day = self.load_from_mongo([i], minute_interval)
+            if loaded_roi_reg_day[1] == 0:
+                end_date = i + datetime.timedelta(hours=24)
+                roi_region_hourly = self._get_robot_region_stay_duration(i, end_date, minute_interval)
+                roi_region_daily.update({i.day: roi_region_hourly})
+            else:
+                roi_region_daily.update({i.day: loaded_roi_reg_day[0][i.day]})
             self._month_year_observation_taken.update({i.day: (i.month, i.year)})
         self.region_observation_duration = roi_region_daily
         return roi_region_daily
@@ -193,21 +199,16 @@ class RegionObservationTimeManager(object):
             Checking if all robot region relation based on its stay duration is capped
             by minute_interval * 60 (total seconds). If it is not, then normalization is applied
         """
+        regions = roi_temp_list.keys()
+        _hourly_poses = [0] * 24
+        for i in range(24):
+            for region in regions:
+                _hourly_poses[i] += sum(roi_temp_list[region][i].values())
+
+        normalizing = sum([1 for i in _hourly_poses if i > 3601]) > 0
+        max_hourly_poses = max(_hourly_poses)
+
         for reg, hourly_poses in roi_temp_list.iteritems():
-            _hourly_poses = list()
-            for minute_poses in hourly_poses:
-                _hourly_poses.append(sum([i for i in minute_poses.itervalues()]))
-            max_hourly_poses = max(_hourly_poses)
-            normalizing = False
-            for ind, seconds in enumerate(_hourly_poses):
-                if seconds > 3601:
-                    normalizing = True
-                    rospy.logwarn(
-                        "The number of seconds robot being in %s in hour %d is greater than 3600 with sampling %d" %
-                        (reg, ind, sampling_rate)
-                    )
-                    rospy.logwarn("Normalizing the number of seconds")
-                    break
             if normalizing:
                 for ind, val in enumerate(hourly_poses):
                     for minute, seconds in val.iteritems():
@@ -216,15 +217,21 @@ class RegionObservationTimeManager(object):
 
 
 if __name__ == '__main__':
-    rospy.init_node("region_observation_time_test")
+    rospy.init_node("region_observation_time")
+
+    if len(sys.argv) < 6:
+        rospy.logerr("usage: region_ob_time soma config month year minute_interval")
+        sys.exit(2)
+
+    year = int(sys.argv[4])
+    month = int(sys.argv[3])
     days = [
-        # datetime.datetime(2015, 6, 27, 0, 0),
-        datetime.datetime(2015, 6, 28, 0, 0),
-        datetime.datetime(2015, 6, 29, 0, 0)
-        # datetime.datetime(2015, 5, 6, 0, 0)
+        datetime.datetime(year, month, i, 0, 0) for i in range(
+            1, calendar.monthrange(year, month)[1]+1
+        )
     ]
-    interval = 20
-    rsd = RegionObservationTimeManager("rwth", "rwth_novelty")
+    interval = int(sys.argv[5])
+    rsd = RegionObservationTimeManager(sys.argv[1], sys.argv[2])
     rsd.calculate_region_observation_duration(days, interval)
     rsd.store_to_mongo()
     print rsd.load_from_mongo(days, interval)

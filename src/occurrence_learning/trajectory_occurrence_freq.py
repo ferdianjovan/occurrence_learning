@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import datetime
+import sys
 from scipy.stats import gamma
 
 import rospy
@@ -49,7 +49,7 @@ class TrajectoryOccurrenceFrequencies(object):
             self.periodic_days = [i for i in range(7)]
         else:
             self.periodic_days = [i for i in range(31)]
-        self.minute_interval = interval
+        self.minute_interval = minute_interval
         self.ms = MessageStoreProxy(collection="occurrence_rates")
         self.tof = dict()
 
@@ -57,6 +57,7 @@ class TrajectoryOccurrenceFrequencies(object):
         """
             Load trajectory occurrence frequency from mongodb occurrence_rates collection.
         """
+        rospy.loginfo("Retrieving continuous tof from database...")
         query = {
             "soma": self.soma, "soma_config": self.soma_config,
             "periodic_type": self.periodic_type
@@ -71,19 +72,17 @@ class TrajectoryOccurrenceFrequencies(object):
             return
 
         for i in logs:
-            if i[0].end_minute - i[0].start_minute != self.minute_interval:
-                continue
-            if i[0].region_id not in self.tof:
-                self.init_region_tof(i[0].region_id)
-            self.tof[i[0].region_id][i[0].day][i[0].hour][i[0].end_minute].alpha = i[0].occurrence_shape
-            self.tof[i[0].region_id][i[0].day][i[0].hour][i[0].end_minute].beta = i[0].occurrence_scale
-            self.tof[i[0].region_id][i[0].day][i[0].hour][i[0].end_minute].gamma_map = i[0].occurrence_rate
-            rospy.loginfo(
-                "Reg: %s, Day: %d, Hour: %d, Mins: %d, Lambda: %f" % (
-                    i[0].region_id, i[0].day, i[0].hour, i[0].end_minute,
-                    i[0].occurrence_rate
-                )
-            )
+            same_hour = (i[0].end_hour == i[0].start_hour)
+            within_interval = (i[0].end_hour == i[0].start_hour+1) and (i[0].end_minute - i[0].start_minute) % 60 == self.minute_interval
+            if same_hour or within_interval:
+                if i[0].region_id not in self.tof:
+                    self.init_region_tof(i[0].region_id)
+                minute = (i[0].start_minute + self.minute_interval)
+                if minute in self.tof[i[0].region_id][i[0].day][i[0].start_hour]:
+                    self.tof[i[0].region_id][i[0].day][i[0].start_hour][minute].alpha = i[0].occurrence_shape
+                    self.tof[i[0].region_id][i[0].day][i[0].start_hour][minute].beta = i[0].occurrence_scale
+                    self.tof[i[0].region_id][i[0].day][i[0].start_hour][minute].gamma_map = i[0].occurrence_rate
+        rospy.loginfo("Loading is complete...")
 
     def update_tof(self, reg_traj):
         """
@@ -92,6 +91,7 @@ class TrajectoryOccurrenceFrequencies(object):
             based on hours in the form of lists. Each hour is splitted into minute interval
             i.e. {20, 40, 60} with the number of trajectories during that interval
         """
+        rospy.loginfo("Updating tof...")
         for reg, daily_traj in reg_traj.iteritems():
             for day, hourly_traj in daily_traj.iteritems():
                 for hour, mins_traj in enumerate(hourly_traj):
@@ -100,6 +100,7 @@ class TrajectoryOccurrenceFrequencies(object):
                             if reg not in self.tof:
                                 self.init_region_tof(reg)
                             self.tof[reg][day][hour][mins].update_lambda([traj])
+        rospy.loginfo("Updating is complete...")
 
     def init_region_tof(self, reg):
         """
@@ -123,45 +124,46 @@ class TrajectoryOccurrenceFrequencies(object):
         """
             Store self.tof into mongodb in occurrence_rates collection
         """
-        for reg, daily_tof in tof.tof.iteritems():
+        rospy.loginfo("Storing to database...")
+        for reg, daily_tof in self.tof.iteritems():
             for day, hourly_tof in daily_tof.iteritems():
                 for hour, minutely_tof in enumerate(hourly_tof):
                     for mins, lmbd in minutely_tof.iteritems():
-                        rospy.loginfo(
-                            "Reg: %s, Day: %d, Hour: %d, Mins: %d, Lambda: %f" % (reg, day, hour, mins, lmbd.gamma_map)
-                        )
                         self._store_tof(reg, day, hour, mins, lmbd)
+        rospy.loginfo("Storing is complete...")
 
     # helper function of store_tof
     def _store_tof(self, reg, day, hour, mins, lmbd):
         start_minute = mins - self.minute_interval
         occu_msg = OccurrenceRate(
-            self.soma, self.soma_config, reg.encode("ascii"), day, hour, start_minute,
+            self.soma, self.soma_config, reg.encode("ascii"), day, hour, hour, start_minute,
             mins, lmbd.alpha, lmbd.beta, lmbd.gamma_map, self.periodic_type
         )
         query = {
             "soma": self.soma, "soma_config": self.soma_config,
-            "region_id": reg.encode("ascii"), "day": day, "hour": hour,
-            "start_minute": start_minute, "end_minute": mins,
+            "region_id": reg.encode("ascii"), "day": day, "start_hour": hour,
+            "end_hour": hour, "start_minute": start_minute, "end_minute": mins,
             "periodic_type": self.periodic_type
         }
         if lmbd.gamma_map > 0:
-            meta = {'inserted_at': datetime.datetime.now()}
             if len(self.ms.query(OccurrenceRate._type, message_query=query)) > 0:
-                self.ms.update(occu_msg, message_query=query, meta=meta)
+                self.ms.update(occu_msg, message_query=query)
             else:
-                self.ms.insert(occu_msg, meta)
+                self.ms.insert(occu_msg)
 
 
 if __name__ == '__main__':
     rospy.init_node("occurrence_rate_learning")
-    interval = 20
-    trk = TrajectoryRegionKnowledge("rwth", "rwth_novelty", interval)
-    # trk = TrajectoryRegionKnowledge("g4s", "g4s_test", interval)
-    reg_trajs = trk.estimate_trajectories_weekly(6, 2015)
-    # reg_trajs = trk.estimate_trajectories_weekly(5, 2015)
 
-    tof = TrajectoryOccurrenceFrequencies("rwth", "rwth_novelty", minute_interval=interval)
+    if len(sys.argv) < 6:
+        rospy.logerr("usage: tof soma config month year minute_interval")
+        sys.exit(2)
+
+    interval = int(sys.argv[5])
+    trk = TrajectoryRegionKnowledge(sys.argv[1], sys.argv[2], interval)
+    reg_trajs = trk.estimate_trajectories_weekly(int(sys.argv[3]), int(sys.argv[4]))
+
+    tof = TrajectoryOccurrenceFrequencies(sys.argv[1], sys.argv[2], minute_interval=interval)
     tof.load_tof()
     for i in reg_trajs:
         tof.update_tof(i)
