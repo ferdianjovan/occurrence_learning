@@ -40,13 +40,13 @@ def point_inside_polygon(x, y, poly):
 
 class TOFViz(object):
 
-    def __init__(self, soma_map, soma_config, minute_interval=60):
-        self.tof = TrajectoryOccurrenceFrequencies(soma_map, soma_config, minute_interval)
+    def __init__(self, soma_map, soma_config, minute_interval=1, window_time=10):
+        self.tof = TrajectoryOccurrenceFrequencies(soma_map, soma_config, minute_interval, window_time)
         self.max_periodic_day = self.tof.periodic_days[-1]
         self.tof.load_tof()
         self.tof = self.tof.tof
 
-        self.minute_interval = minute_interval
+        self.window_time = window_time
         self.pub = rospy.Publisher("tof_roi", MarkerArray, queue_size=10)
         self.region_markers = self.init_region_markers(soma_map, soma_config)
         self.text_markers = self.init_text_markers(soma_map, soma_config)
@@ -172,9 +172,9 @@ class TOFViz(object):
         rospy.loginfo("Hour: %d" % counter[1])
         while not rospy.is_shutdown():
             if counter[2] < max_counter[2]:
-                counter[2] += self.minute_interval
+                counter[2] += self.window_time
             else:
-                counter[2] = self.minute_interval
+                counter[2] = self.window_time
                 if counter[1] < max_counter[1]:
                     counter[1] += 1
                     rospy.loginfo("Hour: %d" % counter[1])
@@ -230,10 +230,10 @@ class TOFViz(object):
 if __name__ == "__main__":
     rospy.init_node("tof_visualization")
     if len(sys.argv) < 4:
-        rospy.logerr("usage: visualization map map_config minute_interval")
+        rospy.logerr("usage: visualization map map_config minute_interval window_time")
         sys.exit(2)
 
-    test = TOFViz(sys.argv[1], sys.argv[2], int(sys.argv[3]))
+    test = TOFViz(sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
     test.visualize_tof()
     # test.show_specific_region(12, 0, 7, 40)
     rospy.spin()

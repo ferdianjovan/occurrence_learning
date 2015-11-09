@@ -24,7 +24,7 @@ def week_of_month(tgtdate):
     return (tgtdate - startdate).days // 7 + 1
 
 
-class TrajectoryRegionKnowledge(object):
+class TrajectoryRegionEstimate(object):
 
     def __init__(self, soma_map, soma_config, minute_interval=60):
         self.soma_map = soma_map
@@ -35,57 +35,16 @@ class TrajectoryRegionKnowledge(object):
         rospy.loginfo("Connecting to geospatial_store and roslog database...")
         self.gs = GeoSpatialStoreProxy('geospatial_store', 'soma')
 
-    def estimate_trajectories_monthly(self, month=1, year=2015):
+    def estimate_trajectories_daily(self, dates, month=1, year=2015):
         """
-            Estimate the number of trajectories in a region hourly each day for a
-            month assuming that the robot sees the complete region when it sees the region
+            Estimate the number of trajectories in a region hourly each day for particular dates
+            assuming that the robot sees the complete region when it sees the region
         """
-        days_of_month = [
-            datetime.datetime(year, month, i, 0, 0) for i in range(
-                1, calendar.monthrange(year, month)[1]+1
-            )
+        days = [date for date in dates if date <= calendar.monthrange(year, month)[1]]
+        days = [
+            datetime.datetime(year, month, i, 0, 0) for i in days
         ]
-        monthly_trajectories = self.estimate_trajectories(days_of_month)
-        return monthly_trajectories
-
-    def estimate_trajectories_weekly(self, month=1, year=2015):
-        """
-            Estimate the number of trajectories in a region for a month, split by
-            weeks assuming that the robot sees the complete region when it sees the
-            region
-        """
-        monthly_traj = self.estimate_trajectories_monthly(month, year)
-        month_weekly_traj = list()
-
-        # construct the whole month weekly trajectory template
-        first_week = week_of_month(datetime.date(year, month, 1))
-        end_week = week_of_month(
-            datetime.date(year, month, calendar.monthrange(year, month)[1])
-        )
-        if first_week == 0:
-            end_week += 1
-        for l in range(end_week):
-            # create a template of weekly trajectory in the form {region{day[hour{mins}]}}
-            weekly_traj = {
-                i: {
-                    j: [
-                        {
-                            k*self.minute_interval: -1 for k in range(1, (60/self.minute_interval)+1)
-                        }
-                    ]*24 for j in range(7)
-                } for i in monthly_traj.keys()
-            }
-            month_weekly_traj.append(weekly_traj)
-
-        for reg, dly_traj in monthly_traj.iteritems():
-            for day, hourly_traj in dly_traj.iteritems():
-                th_week = week_of_month(datetime.date(year, month, day))
-                if first_week == 1:
-                    th_week -= 1
-                week_day = datetime.date(year, month, day).weekday()
-                month_weekly_traj[th_week][reg][week_day] = hourly_traj
-
-        return month_weekly_traj
+        return self.estimate_trajectories(days)
 
     def estimate_trajectories(self, days):
         """
@@ -129,6 +88,29 @@ class TrajectoryRegionKnowledge(object):
 
         return days_trajectories
 
+    def _extrapolate_trajectory_estimate(self, len_min_interval, seconds_stay_duration, num_traj):
+        """ extrapolate the number of trajectories with specific upper_threshold.
+            upper_threshold is to ceil how long the robot was in an area
+            for one minute interval, if the robot was there for less than 20
+            seconds, then it will be boosted to 20 seconds. """
+        upper_threshold_duration = 0
+        while seconds_stay_duration > upper_threshold_duration:
+            upper_threshold_duration += self.minute_interval * 20
+
+        multiplier_estimator = 3600 / float(
+            len_min_interval * upper_threshold_duration
+        )
+        return math.ceil(multiplier_estimator * num_traj)
+
+    def _hard_trajectory_estimate(self, seconds_stay_duration, num_traj):
+        """ Estimating the number of trajectories with hard threshold.
+            This forces the seconds_stay_duration to be 60 seconds for num_traj to be registered.
+        """
+        temp_num_traj = -1
+        if seconds_stay_duration >= self.minute_interval * 60:
+            temp_num_traj = num_traj
+        return temp_num_traj
+
     def _estimate_trajectories_by_minutes(
         self, region, day, hour, minute, days_trajectories, rois_day, trajectories_day
     ):
@@ -140,12 +122,12 @@ class TrajectoryRegionKnowledge(object):
                 if minute in trajectories_day[hour][region]:
                     traj = trajectories_day[hour][region][minute]
                     if rois_day[region][hour][minute] > 0:
-                        multi_est = 3600 / float(
-                            len(minutes) * rois_day[region][hour][minute]
+                        days_trajectories[region][day][hour][minute] = self._extrapolate_trajectory_estimate(
+                            len(minutes), rois_day[region][hour][minute], traj
                         )
-                        days_trajectories[region][day][hour][minute] = math.ceil(
-                            multi_est * traj
-                        )
+                        # days_trajectories[region][day][hour][minute] = self._hard_trajectory_estimate(
+                        #     rois_day[region][hour][minute], traj
+                        # )
                     else:
                         if traj > 0:
                             rospy.logwarn(
@@ -259,21 +241,3 @@ class TrajectoryRegionKnowledge(object):
             end_hour += min_inter
 
         return trajectories_hourly
-
-
-if __name__ == '__main__':
-    rospy.init_node("trk_test")
-    interval = 20
-    trk = TrajectoryRegionKnowledge("g4s", "g4s_novelty", interval)
-
-    days = [
-        datetime.datetime(2015, 5, 1, 0, 0)  # 740 trajectories dengan 55 entries for region_observation_time
-        # 105 trajectories are detected where robot is in the region within 13
-        # entries of region_observation_time
-        # 602 trajectories are detected where robot is not in the region
-        # 42 robot was there but no trajectories
-        # jam di region_observation_time itu gmt but dst.
-    ]
-    # print trk.obtain_number_of_trajectories(days)
-    # reg_trajs = trk.estimate_trajectories_weekly(5, 2015)
-    print trk.estimate_trajectories(days)

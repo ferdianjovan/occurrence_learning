@@ -6,13 +6,23 @@ import datetime
 import numpy as np
 from scipy.stats import gamma
 import matplotlib.pyplot as plt
-from occurrence_learning.continuous_tof import ContinuousTOF
+from occurrence_learning.trajectory_occurrence_freq import TrajectoryOccurrenceFrequencies
 
 
-class ContinuousTOFPlot(object):
+class TOFPlot(object):
+    """
+        This class is for plotting the trajectory occurrence frequency every n minute with
+        m window minute interval (as its bin) that is continuous starting from Monday 00:00
+        to Sunday 23:59
+    """
 
     def __init__(self, soma_map, soma_config, minute_interval=1, window_interval=10):
-        self.tof = ContinuousTOF(soma_map, soma_config, minute_interval, window_interval)
+        """
+            Initialize plotting, it needs the name of the soma map, specific soma configuration,
+            the minute interval between two different occurrence rate, and the window interval that
+            acts as bins.
+        """
+        self.tof = TrajectoryOccurrenceFrequencies(soma_map, soma_config, minute_interval, window_interval)
         self.set_xticks(minute_interval, window_interval)
         self.minute_interval = minute_interval
         self.window_interval = window_interval
@@ -28,6 +38,9 @@ class ContinuousTOFPlot(object):
         ]
 
     def set_xticks(self, minute_interval, window_interval):
+        """
+            Set the ticks for the axis, options are weekly and monthly
+        """
         if len(self.tof.periodic_days) == 7:
             days = [
                 "Monday", "Tuesday", "Wednesday", "Thursday", "Friday",
@@ -50,6 +63,11 @@ class ContinuousTOFPlot(object):
         self.xticks = days_hours
 
     def get_y_yerr_per_region(self, region):
+        """
+            Obtain the occurrence rate value, the mode of gamma distribution, for each region including
+            the lower percentile 0.025, and the upper percentile of the value 0.975 showing
+            the wide of the gamma distribution.
+        """
         y = list()
         lower_percentile = list()
         upper_percentile = list()
@@ -59,16 +77,19 @@ class ContinuousTOFPlot(object):
             for i in mins:
                 y.append(hourly_tof[i].gamma_map)
                 lower_percentile.append(
-                    abs(hourly_tof[i].gamma_map - gamma.ppf(0.025, hourly_tof[i].alpha, scale=1/float(hourly_tof[i].beta)))
-                    # gamma.ppf(0.025, mins_tof[i].alpha, scale=1/float(mins_tof[i].beta))
+                    abs(hourly_tof[i].gamma_map - gamma.ppf(0.025, hourly_tof[i].occurrence_shape, scale=1/float(hourly_tof[i].occurrence_scale)))
+                    # gamma.ppf(0.025, mins_tof[i].occurrence_shape, scale=1/float(mins_tof[i].occurrence_scale))
                 )
                 upper_percentile.append(
-                    abs(hourly_tof[i].gamma_map - gamma.ppf(0.975, hourly_tof[i].alpha, scale=1/float(hourly_tof[i].beta)))
-                    # gamma.ppf(0.975, mins_tof[i].alpha, scale=1/float(mins_tof[i].beta))
+                    abs(hourly_tof[i].gamma_map - gamma.ppf(0.975, hourly_tof[i].occurrence_shape, scale=1/float(hourly_tof[i].occurrence_scale)))
+                    # gamma.ppf(0.975, mins_tof[i].occurrence_shape, scale=1/float(mins_tof[i].occurrence_scale))
                 )
         return y, lower_percentile, upper_percentile
 
     def show_tof_per_region(self, region):
+        """
+            Show the occurrence rate over a week/month for each region available from soma map
+        """
         x = np.arange(len(self.xticks))
         xticks = self._get_xticks()
 
@@ -79,12 +100,15 @@ class ContinuousTOFPlot(object):
         plt.xticks(x, xticks, rotation="vertical")
         plt.xlabel("One Week Period with %d minutes interval and %d window time" % (self.minute_interval, self.window_interval))
         plt.ylabel("Occurrence rate value")
-        plt.ylim(ymin=-5)
+        plt.ylim(ymin=-1)
 
         plt.legend()
         plt.show()
 
     def _get_xticks(self):
+        """
+            Modify the ticks for horizontal axis in the plot to look nicer
+        """
         xticks = list()
         for i in self.xticks:
             if string.find(i, ":00") > -1:
@@ -100,6 +124,9 @@ class ContinuousTOFPlot(object):
         return xticks
 
     def show_tof(self):
+        """
+            Show occurrence rate for all regions over a week/month
+        """
         x = np.arange(len(self.xticks))
         xticks = self._get_xticks()
 
@@ -118,21 +145,22 @@ class ContinuousTOFPlot(object):
         plt.xticks(x, xticks, rotation="vertical")
         plt.xlabel("One Week Period with %d minutes interval and %d window time" % (self.minute_interval, self.window_interval))
         plt.ylabel("Occurrence rate value")
-        plt.ylim(ymin=-5)
+        plt.ylim(ymin=-1)
 
         plt.legend()
         plt.show()
 
 
 if __name__ == "__main__":
-    if len(sys.argv) < 6:
-        print("usage: visualization map map_config minute_interval window_interval [all|region]")
+    if len(sys.argv) < 5:
+        print("usage: visualization map map_config minute_interval window_interval")
         sys.exit(2)
 
-    tofplot = ContinuousTOFPlot(sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
-    if sys.argv[5] == "all":
-        tofplot.show_tof()
-    else:
-        print "Available regions: %s" % str(tofplot.regions)
-        region = raw_input("Chosen region: ")
+    tofplot = TOFPlot(sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4]))
+    print "Available regions: %s" % str(tofplot.regions)
+    region = raw_input("Chosen region (or type 'all'): ")
+
+    if region in tofplot.regions:
         tofplot.show_tof_per_region(region)
+    else:
+        tofplot.show_tof()
