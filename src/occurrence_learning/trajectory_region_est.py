@@ -9,21 +9,6 @@ from soma_geospatial_store.geospatial_store import GeoSpatialStoreProxy
 from occurrence_learning.region_observation_time import RegionObservationTimeManager
 
 
-def week_of_month(tgtdate):
-    """
-        Assuming the first week of the month starts with the first monday of the month.
-        If the month starts on any other day, then the first week will start from 0.
-    """
-    days_this_month = calendar.mdays[tgtdate.month]
-    for i in range(1, days_this_month):
-        d = datetime.date(tgtdate.year, tgtdate.month, i)
-        if d.day - d.weekday() > 0:
-            startdate = d
-            break
-    # now we can use the modulo 7 appraoch
-    return (tgtdate - startdate).days // 7 + 1
-
-
 class TrajectoryRegionEstimate(object):
 
     def __init__(self, soma_map, soma_config, minute_interval=60):
@@ -92,7 +77,8 @@ class TrajectoryRegionEstimate(object):
         """ extrapolate the number of trajectories with specific upper_threshold.
             upper_threshold is to ceil how long the robot was in an area
             for one minute interval, if the robot was there for less than 20
-            seconds, then it will be boosted to 20 seconds. """
+            seconds, then it will be boosted to 20 seconds.
+        """
         upper_threshold_duration = 0
         while seconds_stay_duration > upper_threshold_duration:
             upper_threshold_duration += self.minute_interval * 20

@@ -12,20 +12,7 @@ from occurrence_learning.msg import RegionObservationTime
 from tf.transformations import euler_from_quaternion
 from mongodb_store.message_store import MessageStoreProxy
 from soma_geospatial_store.geospatial_store import GeoSpatialStoreProxy
-
-
-def robot_view_cone(Px, Py, yaw):
-    """
-        let's call the triangle PLR, where P is the robot pose,
-        L the left vertex, R the right vertex
-    """
-    d = 4       # max monitored distance: reasonably not more than 3.5-4m
-    alpha = 1   # field of view: 57 deg kinect, 58 xtion, we can use exactly 1 rad (=57.3 deg)
-    Lx = Px + d * (math.cos((yaw-alpha)/2))
-    Ly = Py + d * (math.cos((yaw-alpha)/2))
-    Rx = Px + d * (math.cos((yaw+alpha)/2))
-    Ry = Py + d * (math.cos((yaw+alpha)/2))
-    return [[Lx, Ly], [Rx, Ry], [Px, Py]]
+from occurrence_learning.occurrence_learning_util import robot_view_cone
 
 
 class RegionObservationTimeManager(object):

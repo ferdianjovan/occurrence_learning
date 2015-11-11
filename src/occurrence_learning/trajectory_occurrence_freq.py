@@ -11,28 +11,14 @@ from occurrence_learning.msg import OccurrenceRate
 from mongodb_store.message_store import MessageStoreProxy
 from occurrence_learning.occurrence_rate import OccurrenceRate as Lambda
 from occurrence_learning.trajectory_region_est import TrajectoryRegionEstimate
-
-
-def get_trajectory_estimate_for_date(date, trajectory_estimate):
-    """
-        Get specific date from trajectory_estimate in the form {reg{date[hour{minute}]}}.
-        It returns in the same format but only with the desired date.
-    """
-    temp = dict()
-    for reg, daily_trajs in trajectory_estimate.iteritems():
-        if reg not in temp:
-            temp[reg] = dict()
-        if date in daily_trajs:
-            temp[reg][date] = daily_trajs[date]
-        else:
-            temp[reg][date] = list()
-    return temp
+from occurrence_learning.occurrence_learning_util import trajectory_estimate_for_date
+from occurrence_learning.occurrence_learning_util import previous_n_minutes_trajs
 
 
 class TrajectoryOccurrenceFrequencies(object):
 
     def __init__(
-        self, soma_map, soma_config, minute_interval=60,
+        self, soma_map, soma_config, minute_interval=1,
         window_interval=10, periodic_type="weekly"
     ):
         """
@@ -56,7 +42,7 @@ class TrajectoryOccurrenceFrequencies(object):
         """
             Load trajectory occurrence frequency from mongodb occurrence_rates collection.
         """
-        rospy.loginfo("Retrieving continuous tof from database...")
+        rospy.loginfo("Retrieving trajectory occurrence frequencies from database...")
         query = {
             "soma": self.soma, "soma_config": self.soma_config,
             "periodic_type": self.periodic_type
@@ -83,40 +69,24 @@ class TrajectoryOccurrenceFrequencies(object):
                 if key in self.tof[i[0].region_id][i[0].day]:
                     self.tof[i[0].region_id][i[0].day][key].occurrence_shape = i[0].occurrence_shape
                     self.tof[i[0].region_id][i[0].day][key].occurrence_scale = i[0].occurrence_scale
-                    self.tof[i[0].region_id][i[0].day][key].gamma_map = i[0].occurrence_rate
+                    self.tof[i[0].region_id][i[0].day][key].set_occurrence_rate(i[0].occurrence_rate)
         rospy.loginfo("Retrieving is complete...")
 
-    def _get_previous_n_minutes_trajs(self, reg, daily_traj):
-        """
-           get (n-1) minutes window interval of trajectories from the previous day.
-           If the day is zero, then the previous day is the last day within the set periodic days.
-        """
-        temp_n_min_trajs = list()
-        prev_day_trajs = daily_traj[reg].values()[0]
-        for i in range(
-            60 - self.window_interval + self.minute_interval,
-            60, self.minute_interval
-        ):
-            temp_n_min_trajs.append(prev_day_trajs[23][i])
-        return temp_n_min_trajs
-
-    def update_tof_daily(self, curr_day_data, prev_day_data):
+    def update_tof_daily(self, curr_day_data, prev_day_data, curr_date):
         """
             Update trajectory occurrence frequency for one day. Updating the current day,
             tof needs information regarding the number of trajectory from the previous day as well.
             The form for curr_day_data and prev_day_data is {reg{date[hour{minute}]}}.
         """
         rospy.loginfo("Daily update for trajectory occurrence frequency...")
-        for reg, daily_traj in curr_day_data.iteritems():
-            date = daily_traj.keys()[0]
+        for reg, hourly_traj in curr_day_data.iteritems():
+            date = curr_date.day
             if self.periodic_type == "weekly":
-                date = datetime.date(year, month, date).weekday()
-            prev_day_n_min_traj = self._get_previous_n_minutes_trajs(
-                reg, prev_day_data
+                date = curr_date.weekday()
+            prev_day_n_min_traj = previous_n_minutes_trajs(
+                prev_day_data[reg], self.window_interval, self.minute_interval
             )
-            self._update_tof(
-                reg, date, daily_traj[daily_traj.keys()[0]], prev_day_n_min_traj
-            )
+            self._update_tof(reg, date, hourly_traj, prev_day_n_min_traj)
         rospy.loginfo("Daily update is complete...")
 
     def _update_tof(self, reg, date, hourly_traj, prev_n_min_traj):
@@ -127,11 +97,8 @@ class TrajectoryOccurrenceFrequencies(object):
             minutes = sorted(mins_traj)
             for mins in minutes:
                 traj = mins_traj[mins]
-            # for mins, traj in mins_traj.iteritems():
                 temp_data[pointer % length] = traj
                 pointer += 1
-                # if pointer <= length:
-                #     continue
                 if reg not in self.tof:
                     self.init_region_tof(reg)
                 if sum(temp_data) == (-1 * length):
@@ -158,13 +125,10 @@ class TrajectoryOccurrenceFrequencies(object):
         daily_tof = dict()
         for j in self.periodic_days:
             hourly_tof = dict()
-            # for i in range(24 * (60 / self.minute_interval)):
             for i in range(24 * (60 / self.minute_interval) + 1):
                 hour = i / (60 / self.minute_interval)
                 minute = (self.minute_interval * i) % 60
                 temp = [
-                    # hour + (minute + self.window_interval) / 60,
-                    # (minute + self.window_interval) % 60
                     hour + (minute - self.window_interval) / 60,
                     (minute - self.window_interval) % 60
                 ]
@@ -175,8 +139,6 @@ class TrajectoryOccurrenceFrequencies(object):
                 hourly_tof.update(
                     {key: Lambda(self.window_interval / float(60))}
                 )
-                # if temp[0] > 23:
-                #     break
 
             daily_tof.update({j: hourly_tof})
         self.tof.update({reg: daily_tof})
@@ -200,7 +162,7 @@ class TrajectoryOccurrenceFrequencies(object):
         occu_msg = OccurrenceRate(
             self.soma, self.soma_config, reg.encode("ascii"), day,
             int(start_hour), int(end_hour), int(start_min), int(end_min),
-            lmbd.occurrence_shape, lmbd.occurrence_scale, lmbd.gamma_map, self.periodic_type
+            lmbd.occurrence_shape, lmbd.occurrence_scale, lmbd.get_occurrence_rate(), self.periodic_type
         )
         query = {
             "soma": self.soma, "soma_config": self.soma_config,
@@ -209,10 +171,11 @@ class TrajectoryOccurrenceFrequencies(object):
             "periodic_type": self.periodic_type
         }
         # as we use MAP, then the posterior probability mode (gamma mode) is the
-        # one we save. However, if gamma map is zero (initial value) or -1
+        # one we save. However, if gamma map is less than default (initial value) or -1
         # (result from an update to gamma where occurrence_shape < 1), we decide to ignore
         # them.
-        if lmbd.gamma_map > 0:
+        temp = Lambda(self.window_interval / float(60))
+        if lmbd.get_occurrence_rate() > temp.get_occurrence_rate():
             if len(self.ms.query(OccurrenceRate._type, message_query=query)) > 0:
                 self.ms.update(occu_msg, message_query=query)
             else:
@@ -262,8 +225,20 @@ if __name__ == '__main__':
                 [calendar.monthrange(prev_year, prev_month)[1]],
                 prev_month, prev_year
             )
+            prev_traj_est = trajectory_estimate_for_date(
+                prev_traj_est, datetime.date(
+                    prev_year, prev_month,
+                    calendar.monthrange(prev_year, prev_month)[1]
+                )
+            )
         else:
-            prev_traj_est = get_trajectory_estimate_for_date(i-1, trajectory_estimate)
-        curr_traj_est = get_trajectory_estimate_for_date(i, trajectory_estimate)
-        tof.update_tof_daily(curr_traj_est, prev_traj_est)
+            prev_traj_est = trajectory_estimate_for_date(
+                trajectory_estimate, datetime.date(year, month, i-1)
+            )
+        curr_traj_est = trajectory_estimate_for_date(
+            trajectory_estimate, datetime.date(year, month, i)
+        )
+        tof.update_tof_daily(
+            curr_traj_est, prev_traj_est, datetime.date(year, month, i)
+        )
     tof.store_tof()

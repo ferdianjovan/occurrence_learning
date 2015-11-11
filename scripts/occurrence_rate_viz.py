@@ -10,32 +10,13 @@ from std_msgs.msg import Header, ColorRGBA
 from visualization_msgs.msg import Marker, MarkerArray
 from mongodb_store.message_store import MessageStoreProxy
 from occurrence_learning.trajectory_occurrence_freq import TrajectoryOccurrenceFrequencies
+from occurrence_learning.occurrence_learning_util import point_inside_polygon
 
 
 def colour_func(x, y):
     if x == 0:
         x = 0.00001
     return float(x ** 2) / float(x ** 2 + (y * 5) * x)
-
-
-def point_inside_polygon(x, y, poly):
-
-    n = len(poly)
-    inside = False
-
-    p1x, p1y = poly[0]
-    for i in range(n + 1):
-        p2x, p2y = poly[i % n]
-        if y > min(p1y, p2y):
-            if y <= max(p1y, p2y):
-                if x <= max(p1x, p2x):
-                    if p1y != p2y:
-                        xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
-                    if p1x == p2x or x <= xinters:
-                        inside = not inside
-        p1x, p1y = p2x, p2y
-
-    return inside
 
 
 class TOFViz(object):
@@ -199,7 +180,7 @@ class TOFViz(object):
 
     def change_marker_color(self, seq, counter, region_marker):
         region_marker.header = Header(seq, rospy.Time(), "/map")
-        color_value = self.tof[str(region_marker.id)][counter[0]][counter[1]][counter[2]].gamma_map
+        color_value = self.tof[str(region_marker.id)][counter[0]][counter[1]][counter[2]].get_occurrence_rate()
         # rospy.loginfo("Region %s: %d" % (str(region_marker.id), color_value))
 
         for i, color in enumerate(region_marker.colors):
@@ -212,7 +193,7 @@ class TOFViz(object):
     def change_marker_text(self, seq, counter, text_marker):
         text_marker.header = Header(seq, rospy.Time(), "/map")
         text_marker.text = str(
-            round(self.tof[str(text_marker.id)][counter[0]][counter[1]][counter[2]].gamma_map, 3)
+            round(self.tof[str(text_marker.id)][counter[0]][counter[1]][counter[2]].get_occurrence_rate(), 3)
         )
 
         return text_marker
