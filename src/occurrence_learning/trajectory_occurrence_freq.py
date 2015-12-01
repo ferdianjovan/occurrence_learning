@@ -58,7 +58,7 @@ class TrajectoryOccurrenceFrequencies(object):
 
         for i in logs:
             same_hour = (i[0].end_hour == i[0].start_hour)
-            within_interval = (i[0].end_hour == i[0].start_hour+1) and (i[0].end_minute - i[0].start_minute) % 60 == self.window_interval
+            within_interval = (i[0].end_hour == (i[0].start_hour+1)%24) and (i[0].end_minute - i[0].start_minute) % 60 == self.window_interval
             if same_hour or within_interval:
                 if i[0].region_id not in self.tof:
                     self.init_region_tof(i[0].region_id)
@@ -137,7 +137,8 @@ class TrajectoryOccurrenceFrequencies(object):
                     datetime.time(hour % 24, minute).isoformat()[:-3]
                 )
                 hourly_tof.update(
-                    {key: Lambda(self.window_interval / float(60))}
+                    # {key: Lambda(self.window_interval / float(60))}
+                    {key: Lambda()}
                 )
 
             daily_tof.update({j: hourly_tof})
@@ -174,7 +175,8 @@ class TrajectoryOccurrenceFrequencies(object):
         # one we save. However, if gamma map is less than default (initial value) or -1
         # (result from an update to gamma where occurrence_shape < 1), we decide to ignore
         # them.
-        temp = Lambda(self.window_interval / float(60))
+        # temp = Lambda(self.window_interval / float(60))
+        temp = Lambda()
         if lmbd.get_occurrence_rate() > temp.get_occurrence_rate():
             if len(self.ms.query(OccurrenceRate._type, message_query=query)) > 0:
                 self.ms.update(occu_msg, message_query=query)

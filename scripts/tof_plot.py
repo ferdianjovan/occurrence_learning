@@ -1,8 +1,6 @@
 #!/usr/bin/env python
 
 import sys
-import string
-import datetime
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -29,6 +27,7 @@ class TOFPlot(object):
         self.x = np.arange(len(self.xticks))
         self.minute_interval = minute_interval
         self.window_interval = window_interval
+        self.periodic_length = len(self.tof.periodic_days)
         self.tof.load_tof()
         self.tof = self.tof.tof
         self.regions = self.tof.keys()
@@ -46,22 +45,30 @@ class TOFPlot(object):
             the lower percentile 0.025, and the upper percentile of the value 0.975 showing
             the wide of the gamma distribution.
         """
+        length = (self.window_interval/self.minute_interval) - 1
         y = list()
         lower_percentile = list()
         upper_percentile = list()
         region_tof = self.tof[region]
         for day, hourly_tof in region_tof.iteritems():
             mins = sorted(hourly_tof)
+            daily_y = list()
+            daily_low = list()
+            daily_up = list()
             for i in mins:
-                y.append(hourly_tof[i].get_occurrence_rate())
-                lower_percentile.append(
+                daily_y.append(hourly_tof[i].get_occurrence_rate())
+                daily_low.append(
                     abs(hourly_tof[i].get_occurrence_rate() - gamma.ppf(0.025, hourly_tof[i].occurrence_shape, scale=1/float(hourly_tof[i].occurrence_scale)))
                     # gamma.ppf(0.025, mins_tof[i].occurrence_shape, scale=1/float(mins_tof[i].occurrence_scale))
                 )
-                upper_percentile.append(
+                daily_up.append(
                     abs(hourly_tof[i].get_occurrence_rate() - gamma.ppf(0.975, hourly_tof[i].occurrence_shape, scale=1/float(hourly_tof[i].occurrence_scale)))
                     # gamma.ppf(0.975, mins_tof[i].occurrence_shape, scale=1/float(mins_tof[i].occurrence_scale))
                 )
+            y.extend(daily_y[-length:] + daily_y[:-length])
+            lower_percentile.extend(daily_low[-length:] + daily_low[:-length])
+            upper_percentile.extend(daily_up[-length:] + daily_up[:-length])
+
         return y, lower_percentile, upper_percentile
 
     def show_tof_per_region(self, region):
