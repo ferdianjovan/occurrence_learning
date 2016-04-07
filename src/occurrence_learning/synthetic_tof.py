@@ -11,80 +11,6 @@ from occurrence_learning.trajectory_periodicity import TrajectoryPeriodicity
 from occurrence_learning.trajectory_occurrence_freq import TrajectoryOccurrenceFrequencies as TOF
 
 
-class Configuration(object):
-
-    def __init__(self):
-        self.soma_map = "soma"
-        self.soma_config = "soma_config"
-        self.minute_interval = 1
-        self.window_interval = 10
-        self.periodicity_type = "weekly"
-        self.periodic_length = 7
-        self.configuration = {
-            "Monday": {
-                "09:00-10:00": 200,
-                "10:00-12:00": 50,
-                "12:00-13:30": 300,
-                "13:30-16:00": 100,
-                "16:00-18:00": 300,
-                "18:00-20:00": 50
-            },
-            "Tuesday": {
-                "09:00-10:00": 200,
-                "10:00-12:00": 50,
-                "12:00-13:30": 300,
-                "13:30-16:00": 100,
-                "16:00-18:00": 300,
-                "18:00-20:00": 50
-            },
-            "Wednesday": {
-                "09:00-10:00": 200,
-                "10:00-12:00": 50,
-                "12:00-13:30": 300,
-                "13:30-16:00": 100,
-                "16:00-18:00": 300,
-                "18:00-20:00": 50
-            },
-            "Thursday": {
-                "09:00-10:00": 200,
-                "10:00-12:00": 50,
-                "12:00-13:30": 300,
-                "13:30-16:00": 100,
-                "16:00-18:00": 300,
-                "18:00-20:00": 50
-            },
-            "Friday": {
-                "09:00-10:00": 200,
-                "10:00-12:00": 50,
-                "12:00-13:30": 300,
-                "13:30-16:00": 100,
-                "16:00-18:00": 300,
-                "18:00-20:00": 50
-            },
-            "Saturday": {
-                "10:00-12:00": 10,
-                "12:00-13:30": 20,
-                "13:30-16:00": 10,
-                "16:00-18:00": 30,
-            },
-            "Sunday": {
-                "10:00-12:00": 10,
-                "12:00-13:30": 30,
-                "13:30-16:00": 40,
-            },
-        }
-
-    def day_to_date(self, day):
-        temp = {
-            "Monday": 0, "Tuesday": 1, "Wednesday": 2, "Thursday": 3,
-            "Friday": 4, "Saturday": 5, "Sunday": 6
-        }
-        date = day
-        if self.periodicity_type == "weekly":
-            date = temp[day]
-        return date
-
-
 class SyntheticWave(object):
 
     def __init__(self, minute_interval):
@@ -98,7 +24,7 @@ class SyntheticWave(object):
             i * minute_interval for i in range(1, (60/minute_interval) + 1)
         ]
 
-    def create_wave(self, frequencies, length, gauss=True):
+    def create_wave(self, frequencies, length, gauss=False):
         random.seed()
         amplitudes = sorted(
             [i*0.1 for i in range(1, len(self.frequencies)+1)], reverse=True
@@ -106,21 +32,18 @@ class SyntheticWave(object):
         x = numpy.linspace(0.0, length, length)
         wave = 50.0 + x * 0
         for ind, freq in enumerate(frequencies):
-            if gauss:
-                wave += amplitudes[ind] * random.gauss(1, 0.2) * numpy.cos(
-                    freq * 2.0 * numpy.pi * x
-                )
-            else:
-                wave += amplitudes[ind] * numpy.cos(freq * 2.0 * numpy.pi * x)
-        return self.add_noise_to(wave)
+            wave += amplitudes[ind] * numpy.cos(freq * 2.0 * numpy.pi * x)
+        if gauss:
+            wave += numpy.random.normal(0, 40, length)
+        return wave
 
     def add_noise_to(self, series, mu=1, sigma=1):
         return [i*random.gauss(mu, sigma) for i in series]
 
-    def _get_one_week_wave(self, dates, week_wave=dict()):
+    def _get_one_week_wave(self, dates, week_wave=dict(), noise=False):
         # First value in dates must be monday
         # Dates that are already in the data ({reg}) will be ignored
-        wave = self.create_wave(self.frequencies, self.length)
+        wave = self.create_wave(self.frequencies, self.length, noise)
         for region in self.regions:
             if region not in week_wave:
                 week_wave[region] = dict()
@@ -139,9 +62,9 @@ class SyntheticWave(object):
                     week_wave[region][date] = temp
         return week_wave
 
-    def get_one_month_synthetic_wave(self):
+    def get_one_month_synthetic_wave(self, noise=False):
         dates = [i for i in range(4, 32)]
-        result = self._get_one_week_wave([27, 28, 29, 30, 1, 2, 3])
+        result = self._get_one_week_wave([27, 28, 29, 30, 1, 2, 3], noise=noise)
         temp = {
             region: {
                 date: daily_data for date, daily_data in val.iteritems() if date in [1, 2, 3]
@@ -150,18 +73,18 @@ class SyntheticWave(object):
         result = temp
         for i in [4, 11, 18, 25]:
             week_dates = dates[dates.index(i):dates.index(i)+7]
-            result = self._get_one_week_wave([j for j in week_dates], result)
+            result = self._get_one_week_wave([j for j in week_dates], result, noise)
         return result
 
-    def get_one_week_synthetic_wave(self):
-        result = self._get_one_week_wave([i for i in range(4, 11)])
+    def get_one_week_synthetic_wave(self, noise=False):
+        result = self._get_one_week_wave([i for i in range(4, 11)], noise=noise)
         temp = {
             region: {
                 date: daily_data for date, daily_data in val.iteritems() if date in [10]
             } for region, val in result.iteritems()
         }
         result = temp
-        return self._get_one_week_wave([i for i in range(11, 18)], result)
+        return self._get_one_week_wave([i for i in range(11, 18)], result, noise)
 
 
 if __name__ == '__main__':
@@ -176,7 +99,7 @@ if __name__ == '__main__':
 
     sw = SyntheticWave(interval)
     if not int(sys.argv[3]):
-        waves = sw.get_one_month_synthetic_wave()
+        waves = sw.get_one_month_synthetic_wave(True)
         tof = TOF("synthetic", "synthetic_config", interval, window)
         tof.load_tof()
         for i in range(4, 31+1):
@@ -191,15 +114,35 @@ if __name__ == '__main__':
             )
         tof.store_tof()
     else:
-        waves = sw.get_one_week_synthetic_wave()
+        waves = sw.get_one_week_synthetic_wave(True)
         tp = TrajectoryPeriodicity("synthetic", "synthetic_config", interval, window)
         inp = raw_input("MSE(0) or Prediction MSE(1): ")
         if int(inp) == 0:
+            rospy.loginfo("Start model selection...")
+            tp.model_selection(waves, 5, 2015, True)
+            rospy.loginfo("End model selection...")
+            # tp.addition_technique = True
             for region in tp.regions:
                 tp.calculate_mse("1", waves["1"], 5, 2015)
-                tp.calculate_mse("1", waves["1"], 5, 2015, False)
+
+            rospy.loginfo("Start model selection...")
+            tp.model_selection(waves, 5, 2015, False)
+            rospy.loginfo("End model selection...")
+            # tp.addition_technique = False
+            for region in tp.regions:
+                tp.calculate_mse("1", waves["1"], 5, 2015)
         else:
+            rospy.loginfo("Start model selection...")
+            tp.model_selection(waves, 5, 2015, True)
+            rospy.loginfo("End model selection...")
+            tp.addition_technique = True
             for region in tp.regions:
                 tp.prediction_accuracy("1", waves["1"], 5, 2015)
-                tp.prediction_accuracy("1", waves["1"], 5, 2015, addition_method=False)
-                # tp.plot_region_idft("1")
+
+            rospy.loginfo("Start model selection...")
+            tp.model_selection(waves, 5, 2015, False)
+            rospy.loginfo("End model selection...")
+            tp.addition_technique = False
+            for region in tp.regions:
+                tp.prediction_accuracy("1", waves["1"], 5, 2015)
+            # tp.plot_region_idft("1")

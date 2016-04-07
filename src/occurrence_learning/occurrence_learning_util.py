@@ -4,6 +4,8 @@ import math
 import rospy
 import calendar
 import datetime
+from tf.transformations import euler_from_quaternion
+from tf.transformations import quaternion_from_euler
 
 
 def week_of_month(tgtdate):
@@ -82,10 +84,23 @@ def robot_view_cone(Px, Py, yaw):
     d = 4       # max monitored distance: reasonably not more than 3.5-4m
     alpha = 1   # field of view: 57 deg kinect, 58 xtion, we can use exactly 1 rad (=57.3 deg)
     Lx = Px + d * (math.cos((yaw-alpha)/2))
-    Ly = Py + d * (math.cos((yaw-alpha)/2))
+    Ly = Py + d * (math.sin((yaw-alpha)/2))
     Rx = Px + d * (math.cos((yaw+alpha)/2))
-    Ry = Py + d * (math.cos((yaw+alpha)/2))
+    Ry = Py + d * (math.sin((yaw+alpha)/2))
     return [[Lx, Ly], [Rx, Ry], [Px, Py]]
+
+
+def robot_view_area(Px, Py, yaw):
+    d = 3
+    poses = list()
+    degree = 45 / float(180) * math.pi
+
+    for i in range(8):
+        x = Px + d * (math.cos((yaw+(i * degree) % (2 * math.pi))))
+        y = Py + d * (math.sin((yaw+(i * degree) % (2 * math.pi))))
+        poses.append([x, y])
+    # return [[Px + 4, Py], [Px, Py - 4], [Px - 4, Py], [Px, Py + 4]]
+    return poses
 
 
 def trajectory_estimate_for_date(trajectory_estimate, date):
@@ -197,3 +212,9 @@ def trajectories_full_dates_periodic(data, month, year, period_length, window_in
         rospy.logwarn("The provided data does not have ordered dates or has skipped dates.")
         rospy.logwarn("Returning empty result.")
     return result
+
+
+def rotation_180_quaternion(quaternion):
+    roll, pitch, yaw = euler_from_quaternion(quaternion)
+    new_yaw = (yaw - math.pi) % (2 * math.pi)
+    return quaternion_from_euler(roll, pitch, new_yaw)

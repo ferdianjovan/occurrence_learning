@@ -12,7 +12,8 @@ from occurrence_learning.msg import RegionObservationTime
 from tf.transformations import euler_from_quaternion
 from mongodb_store.message_store import MessageStoreProxy
 from soma_geospatial_store.geospatial_store import GeoSpatialStoreProxy
-from occurrence_learning.occurrence_learning_util import robot_view_cone
+# from occurrence_learning.occurrence_learning_util import robot_view_cone
+from occurrence_learning.occurrence_learning_util import robot_view_area
 
 
 class RegionObservationTimeManager(object):
@@ -154,7 +155,8 @@ class RegionObservationTimeManager(object):
                 _, _, yaw = euler_from_quaternion(
                     [0, 0, pose['orientation']['z'], pose['orientation']['w']]
                 )
-                coords = robot_view_cone(pose['position']['x'], pose['position']['y'], yaw)
+                # coords = robot_view_cone(pose['position']['x'], pose['position']['y'], yaw)
+                coords = robot_view_area(pose['position']['x'], pose['position']['y'], yaw)
                 langitude_latitude = list()
                 for pt in coords:
                     langitude_latitude.append(self.gs.coords_to_lnglat(pt[0], pt[1]))
@@ -216,6 +218,7 @@ if __name__ == '__main__':
         datetime.datetime(year, month, i, 0, 0) for i in range(
             1, calendar.monthrange(year, month)[1]+1
         )
+        # datetime.datetime(year, month, i, 0, 0) for i in {6, 11, 12, 22, 26, 27}
     ]
     interval = int(sys.argv[5])
     rsd = RegionObservationTimeManager(sys.argv[1], sys.argv[2])

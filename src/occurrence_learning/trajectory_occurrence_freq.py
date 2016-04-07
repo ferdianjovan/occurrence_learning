@@ -58,7 +58,7 @@ class TrajectoryOccurrenceFrequencies(object):
 
         for i in logs:
             same_hour = (i[0].end_hour == i[0].start_hour)
-            within_interval = (i[0].end_hour == (i[0].start_hour+1)%24) and (i[0].end_minute - i[0].start_minute) % 60 == self.window_interval
+            within_interval = (i[0].end_hour == (i[0].start_hour+1) % 24) and (i[0].end_minute - i[0].start_minute) % 60 == self.window_interval
             if same_hour or within_interval:
                 if i[0].region_id not in self.tof:
                     self.init_region_tof(i[0].region_id)
@@ -187,7 +187,7 @@ class TrajectoryOccurrenceFrequencies(object):
 if __name__ == '__main__':
     rospy.init_node("trajectory_occurrence_frequency")
 
-    if len(sys.argv) < 7:
+    if len(sys.argv) < 9:
         rospy.logerr("usage: tof soma config start_date end_date month year minute_interval window_time")
         sys.exit(2)
 

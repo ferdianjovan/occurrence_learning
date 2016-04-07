@@ -81,16 +81,20 @@ class TOFPlot(object):
             fmt="-o", label="Region " + region
         )
 
+        # plt.title("Occurrence Rate for Region %s" % region, fontsize=30)
         plt.title("Occurrence Rate for Region %s" % region)
+        # plt.xticks(self.x, self.xticks, rotation="horizontal", fontsize=30)
         plt.xticks(self.x, self.xticks, rotation="vertical")
         plt.xlabel(
             "One Week Period with %d minutes interval and %d window time" % (
                 self.minute_interval, self.window_interval
             )
         )
+        # plt.ylabel("Occurrence rate value", fontsize=30)
         plt.ylabel("Occurrence rate value")
         plt.ylim(ymin=-1)
 
+        # plt.legend(prop={'size': 30})
         plt.legend()
         plt.show()
 

@@ -33,6 +33,8 @@ class TrajectoryPeriodicity(object):
         self.tof.load_tof()
         self.tof = self.tof.tof
         self.regions = self.tof.keys()
+        self.spectrum_selection = 0
+        self.addition_technique = True
 
     def get_tof_values(self, region):
         """
@@ -49,17 +51,17 @@ class TrajectoryPeriodicity(object):
             y.extend(daily_y[-length:] + daily_y[:-length])
         return y
 
-    def reconstruct_tof_from_spectrum(self, region, addition_method=True):
+    def reconstruct_tof_from_spectrum(self, region, addition_method=True, num_of_freqs=30):
         """
             Reconstruct trajectory occurrence frequency values after they are transformed
             into spectral dimensions.
         """
         original = self.get_tof_values(region)
         if addition_method:
-            spectrums, _ = self.get_significant_frequencies(original, 60)
-            spectrums = spectrums[0:30]
+            spectrums, _ = self.get_significant_frequencies(original, num_of_freqs*2)
+            spectrums = spectrums[0:num_of_freqs]
         else:
-            spectrums = self.get_highest_n_freq(fft(original), 30)
+            spectrums = self.get_highest_n_freq(fft(original), num_of_freqs)
         reconstruction = 0
         for spectrum in spectrums:
             reconstruction += self.rectify_wave(
@@ -69,6 +71,76 @@ class TrajectoryPeriodicity(object):
             lambda x: Lambda().get_occurrence_rate() if x <= 0.0 else x, reconstruction
         )
         return reconstruction, original
+
+    def model_selection(self, data, month, year, addition_method=True, max_freqs=30):
+        spectrum_selection = list()
+        validate_data = dict()
+        for region in self.regions:
+            validate_data.update({
+                region: trajectories_full_dates_periodic(
+                    data[region], month, year, self.length_of_periodicity,
+                    self.window_interval, self.minute_interval
+                )
+            })
+
+        for num_of_freqs in range(1, max_freqs+1):
+            mse_region = list()
+            for region in self.regions:
+                reconstruction_tof, original_tof = self.reconstruct_tof_from_spectrum(
+                    region, addition_method, num_of_freqs
+                )
+                mse_recon, _ = self._calculate_mse(
+                    reconstruction_tof, original_tof, validate_data[region]
+                )
+                mse_region.append(mse_recon)
+            mse_region = [i for i in mse_region if i != -1]
+            spectrum_selection.append(sum(mse_region) / float(len(mse_region)))
+
+        spectrum_selection = spectrum_selection.index(min(spectrum_selection)) + 1
+        rospy.loginfo("Ideal total spectrums: %d" % spectrum_selection)
+        self.spectrum_selection = spectrum_selection
+        self.addition_technique = addition_method
+
+    def calculate_mse(self, region, data, month, year):
+        if self.spectrum_selection != 0:
+            reconstruction_tof, original_tof = self.reconstruct_tof_from_spectrum(
+                region, self.addition_technique, self.spectrum_selection
+            )
+        else:
+            reconstruction_tof, original_tof = self.reconstruct_tof_from_spectrum(
+                region, self.addition_technique
+            )
+        test_data = trajectories_full_dates_periodic(
+            data, month, year, self.length_of_periodicity,
+            self.window_interval, self.minute_interval
+        )
+        reconstruction_tof = [i for j, i in enumerate(reconstruction_tof) if j % 5 == 0]
+        original_tof = [i for j, i in enumerate(original_tof) if j % 5 == 0]
+        test_data = [i for j, i in enumerate(test_data) if j % 5 == 0]
+        # Dropping -1 in test_data together with corresponding tof
+        test_data, reconstruction_tof, original_tof, _ = self._remove_unobserved_data(
+            test_data, reconstruction_tof, original_tof
+        )
+        mse_recon = -1
+        mse_origin = -1
+        if len(reconstruction_tof) > 0 and len(original_tof) > 0:
+            mse_recon = mse(test_data, reconstruction_tof)
+            mse_origin = mse(test_data, original_tof)
+        rospy.loginfo("Calculated MSE for original tof Region %s: %.2f" % (region, mse_origin))
+        rospy.loginfo("Calculated MSE for reconstruction tof Region %s: %.2f" % (region, mse_recon))
+
+        # temp_recon = np.sqrt(mse_recon)
+        # sum_recon = 0
+        # for i in test_data:
+        #     sum_recon += (i - temp_recon)**2
+        # print "std_dev: %f" % (np.sqrt(sum_recon / float(len(test_data) - 1)))
+        # temp_recon = np.sqrt(mse_origin)
+        # sum_recon = 0
+        # for i in test_data:
+        #     sum_recon += (i - temp_recon)**2
+        # print "std_dev: %f" % (np.sqrt(sum_recon / float(len(test_data) - 1)))
+
+        return mse_recon, mse_origin
 
     def rectify_wave(self, freq, amp, phs, num_of_points, up_thres=None, low_thres=None):
         xf = np.linspace(0.0, num_of_points, num_of_points)  # frequency varations
@@ -80,19 +152,23 @@ class TrajectoryPeriodicity(object):
                 wave[ind] = up_thres
         return wave
 
-    def get_significant_frequencies(self, data, total_freq=15):
+    def get_significant_frequencies(self, data, total_freq=15, max_addition=10, max_iteration=1000):
         N = len(data)
         xf = np.linspace(0.0, N, N)
         # initialise significant frequencies by taking frequency 0
         spectrum_data = fft(data)
         [amp, phs, freq] = self.get_highest_n_freq(spectrum_data, 1)[0]
         frequencies = [[amp, phs, freq]]
-        freq_occur_counter = dict()
+        freq_occur_counter = {freq: 1}
+        exit_counter = 0
+        # data -= amp
 
         while len(frequencies) < total_freq:
             spectrum_data = fft(data)
             # recreate wave of the highest frequency
             [amp, phs, freq] = self.get_highest_n_freq(spectrum_data, 2)[1]
+            if freq == 0:
+                [amp, phs, freq] = self.get_highest_n_freq(spectrum_data, 2)[0]
             wave = amp * np.cos((freq * 2.0 * np.pi * xf) + phs)
             # substracting data with the wave
             data -= wave
@@ -101,12 +177,15 @@ class TrajectoryPeriodicity(object):
                 freq_occur_counter.update({freq: 1})
             else:
                 for ind, val in enumerate(frequencies):
-                    if frequencies[ind][2] == freq:
+                    if frequencies[ind][2] == freq and freq_occur_counter[freq] < max_addition:
                         frequencies[ind][0] += amp
                         frequencies[ind][1] = ((
                             freq_occur_counter[freq] * frequencies[ind][1]
                         ) + phs) / (freq_occur_counter[freq] + 1)
                         freq_occur_counter[freq] += 1
+            exit_counter += 1
+            if exit_counter >= max_iteration:
+                break
         return frequencies, data
 
     def get_highest_n_freq(self, freqs, n=15):
@@ -119,14 +198,10 @@ class TrajectoryPeriodicity(object):
         n_freqs = sorted_result[:n]
         return n_freqs
 
-    def calculate_mse(self, region, data, month, year, addition_method=True):
-        reconstruction_tof, original_tof = self.reconstruct_tof_from_spectrum(
-            region, addition_method
-        )
-        test_data = trajectories_full_dates_periodic(
-            data, month, year, self.length_of_periodicity,
-            self.window_interval, self.minute_interval
-        )
+    def _calculate_mse(self, reconstruction_tof, original_tof, test_data):
+        # reconstruction_tof = [i for j, i in enumerate(reconstruction_tof) if j % 5 == 0]
+        # original_tof = [i for j, i in enumerate(original_tof) if j % 5 == 0]
+        # test_data = [i for j, i in enumerate(test_data) if j % 5 == 0]
         # Dropping -1 in test_data together with corresponding tof
         test_data, reconstruction_tof, original_tof, _ = self._remove_unobserved_data(
             test_data, reconstruction_tof, original_tof
@@ -136,8 +211,7 @@ class TrajectoryPeriodicity(object):
         if len(reconstruction_tof) > 0 and len(original_tof) > 0:
             mse_recon = mse(test_data, reconstruction_tof)
             mse_origin = mse(test_data, original_tof)
-        rospy.loginfo("Calculated MSE for original tof Region %s: %.2f" % (region, mse_origin))
-        rospy.loginfo("Calculated MSE for reconstruction tof Region %s: %.2f" % (region, mse_recon))
+
         return mse_recon, mse_origin
 
     def _remove_unobserved_data(self, data1, data2, data3):
@@ -152,10 +226,16 @@ class TrajectoryPeriodicity(object):
         data3 = [j for i, j in enumerate(data3) if i not in deleted_indices]
         return data1, data2, data3, deleted_indices
 
-    def prediction_accuracy(self, region, data, month, year, percentile=0.1, plot=False, addition_method=True):
-        reconstruction_tof, original_tof = self.reconstruct_tof_from_spectrum(
-            region, addition_method
-        )
+    def prediction_accuracy(self, region, data, month, year, percentile=0.1, plot=False):
+        if self.spectrum_selection != 0:
+            reconstruction_tof, original_tof = self.reconstruct_tof_from_spectrum(
+                region, self.addition_technique, self.spectrum_selection
+            )
+        else:
+            reconstruction_tof, original_tof = self.reconstruct_tof_from_spectrum(
+                region, self.addition_technique
+                # region, False, 26
+            )
         test_data = trajectories_full_dates_periodic(
             data, month, year, self.length_of_periodicity,
             self.window_interval, self.minute_interval
@@ -209,28 +289,26 @@ class TrajectoryPeriodicity(object):
         return flag
 
     def plot_region_idft(self, region):
-        data = self.get_tof_values(region)
-        spectrums, _ = self.get_significant_frequencies(data, 60)
-        spectrums = spectrums[:30]
-        spectrums2 = self.get_highest_n_freq(fft(data))
+        if self.spectrum_selection != 0:
+            y, data = self.reconstruct_tof_from_spectrum(
+                region, True, self.spectrum_selection
+            )
+            y2, _ = self.reconstruct_tof_from_spectrum(
+                region, False, self.spectrum_selection
+            )
+        else:
+            y, data = self.reconstruct_tof_from_spectrum(region, True)
+            y2, _ = self.reconstruct_tof_from_spectrum(region, False)
 
-        y = 0
         x = np.linspace(0, len(data), len(data))
         xticks = time_ticks(self.minute_interval, self.window_interval, self.periodic_type)
-        for spectrum in spectrums:
-            y += self.rectify_wave(spectrum[2], spectrum[0], spectrum[1], len(data))
-
-        y2 = 0
-        for spectrum in spectrums2:
-            y2 += self.rectify_wave(spectrum[2], spectrum[0], spectrum[1], len(data))
-
         plt.plot(
-            x, y, "-o", color="red", label="Region " + region + " Amplitude Addition Reconstruction"
+            x, y, "-o", color="red", label="Amplitude Addition Reconstruction"
         )
         plt.plot(
-            x, y2, "-x", color="blue", label="Region " + region + " Best Amplitude Reconstruction"
+            x, y2, "-x", color="blue", label="Best Amplitude Reconstruction"
         )
-        plt.plot(x, data, "-", color="green", label="Region " + region + " Original")
+        plt.plot(x, data, "-", color="green", label="Original Model")
 
         plt.title("Reconstruction Occurrence Rate for Region %s" % region)
         plt.xticks(x, xticks, rotation="vertical")
@@ -273,11 +351,19 @@ if __name__ == "__main__":
     inp = raw_input("MSE(0) or Prediction MSE(1): ")
     if int(inp) == 0:
         rospy.loginfo("Addition Best Amplitude Frequency Method")
+        # rospy.loginfo("Start model selection...")
+        # tp.model_selection(trajectory_estimate, month, year, True)
+        # rospy.loginfo("End model selection...")
+        tp.addition_technique = True
         for region in tp.regions:
             tp.calculate_mse(region, trajectory_estimate[region], month, year)
         rospy.loginfo("Best Amplitude Frequency Method")
+        # rospy.loginfo("Start model selection...")
+        # tp.model_selection(trajectory_estimate, month, year, False)
+        # rospy.loginfo("End model selection...")
+        tp.addition_technique = False
         for region in tp.regions:
-            tp.calculate_mse(region, trajectory_estimate[region], month, year, False)
+            tp.calculate_mse(region, trajectory_estimate[region], month, year)
     else:
         rospy.loginfo("Addition Best Amplitude Frequency Method")
         for region in tp.regions:
@@ -285,4 +371,4 @@ if __name__ == "__main__":
         rospy.loginfo("Best Amplitude Frequency Method")
         for region in tp.regions:
             tp.prediction_accuracy(region, trajectory_estimate[region], month, year, addition_method=False)
-            # tp.plot_region_idft(region)
+        # tp.plot_region_idft("12")
