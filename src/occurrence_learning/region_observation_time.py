@@ -2,7 +2,6 @@
 
 import sys
 import time
-import math
 import datetime
 import calendar
 
@@ -12,8 +11,8 @@ from occurrence_learning.msg import RegionObservationTime
 from tf.transformations import euler_from_quaternion
 from mongodb_store.message_store import MessageStoreProxy
 from soma_geospatial_store.geospatial_store import GeoSpatialStoreProxy
-# from occurrence_learning.occurrence_learning_util import robot_view_cone
-from occurrence_learning.occurrence_learning_util import robot_view_area
+from occurrence_learning.occurrence_learning_util import robot_view_cone
+# from occurrence_learning.occurrence_learning_util import robot_view_area
 
 
 class RegionObservationTimeManager(object):
@@ -65,6 +64,7 @@ class RegionObservationTimeManager(object):
                         temp.append(group_mins)
                         roi_reg_hourly.update({log[0].region_id: temp})
                 roi_reg_hourly[log[0].region_id][end.hour][end.minute+1] = log[0].duration.secs
+                roi_reg_hourly[log[0].region_id][end.hour][end.minute+1] += 0.000000001 * log[0].duration.nsecs
                 total_duration += log[0].duration.secs
             roi_region_daily.update({i.day: roi_reg_hourly})
         self.region_observation_duration = roi_region_daily
@@ -110,7 +110,7 @@ class RegionObservationTimeManager(object):
             "region_id": msg.region_id, "start_from.secs": msg.start_from.secs,
             "until.secs": msg.until.secs
         }
-        if msg.duration.secs > 0:
+        if msg.duration.nsecs > 0:
             if len(self.ms.query(RegionObservationTime._type, message_query=query)) > 0:
                 self.ms.update(msg, message_query=query)
             else:
@@ -155,8 +155,8 @@ class RegionObservationTimeManager(object):
                 _, _, yaw = euler_from_quaternion(
                     [0, 0, pose['orientation']['z'], pose['orientation']['w']]
                 )
-                # coords = robot_view_cone(pose['position']['x'], pose['position']['y'], yaw)
-                coords = robot_view_area(pose['position']['x'], pose['position']['y'], yaw)
+                coords = robot_view_cone(pose['position']['x'], pose['position']['y'], yaw)
+                # coords = robot_view_area(pose['position']['x'], pose['position']['y'], yaw)
                 langitude_latitude = list()
                 for pt in coords:
                     langitude_latitude.append(self.gs.coords_to_lnglat(pt[0], pt[1]))
@@ -212,16 +212,19 @@ if __name__ == '__main__':
         rospy.logerr("usage: region_ob_time soma config month year minute_interval")
         sys.exit(2)
 
+    temp_start_time = rospy.Time.now()
     year = int(sys.argv[4])
     month = int(sys.argv[3])
     days = [
         datetime.datetime(year, month, i, 0, 0) for i in range(
             1, calendar.monthrange(year, month)[1]+1
         )
-        # datetime.datetime(year, month, i, 0, 0) for i in {6, 11, 12, 22, 26, 27}
+        # datetime.datetime(year, month, i, 0, 0) for i in [8, 9]
     ]
     interval = int(sys.argv[5])
     rsd = RegionObservationTimeManager(sys.argv[1], sys.argv[2])
     rsd.calculate_region_observation_duration(days, interval)
     rsd.store_to_mongo()
     print rsd.load_from_mongo(days, interval)
+    temp_end_time = rospy.Time.now()
+    rospy.loginfo("Time needed to complete this %d" % (temp_end_time - temp_start_time).secs)

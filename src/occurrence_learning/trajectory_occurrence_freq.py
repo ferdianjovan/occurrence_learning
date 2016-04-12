@@ -200,6 +200,7 @@ if __name__ == '__main__':
     month = int(sys.argv[5])
     year = int(sys.argv[6])
 
+    temp_start_time = rospy.Time.now()
     tre = TrajectoryRegionEstimate(sys.argv[1], sys.argv[2], interval)
     if start_date > 1:
         trajectory_estimate = tre.estimate_trajectories_daily(
@@ -244,3 +245,5 @@ if __name__ == '__main__':
             curr_traj_est, prev_traj_est, datetime.date(year, month, i)
         )
     tof.store_tof()
+    temp_end_time = rospy.Time.now()
+    rospy.loginfo("Time needed to complete this %d" % (temp_end_time - temp_start_time).secs)

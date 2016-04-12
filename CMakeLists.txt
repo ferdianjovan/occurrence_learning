@@ -4,6 +4,9 @@ project(occurrence_learning)
 find_package(catkin REQUIRED COMPONENTS
   tf
   rospy
+  actionlib
+  actionlib_msgs
+  mongodb_store
   std_msgs
   message_generation
   soma_geospatial_store
@@ -21,23 +24,19 @@ add_message_files(
   RegionObservationTime.msg
 )
 
-## Generate services in the 'srv' folder
-# add_service_files(
-#   FILES
-#   Service1.srv
-#   Service2.srv
-# )
+add_service_files(
+  FILES
+  TrajectoryOccurrenceRate.srv
+)
 
-## Generate actions in the 'action' folder
-# add_action_files(
-#   FILES
-#   Action1.action
-#   Action2.action
-# )
+add_action_files(
+  FILES
+  OccurrenceRateLearning.action
+)
 
 generate_messages(
   DEPENDENCIES
-  std_msgs
+  std_msgs actionlib actionlib_msgs
 )
 
 ###################################
@@ -47,7 +46,7 @@ generate_messages(
 catkin_package(
 #  INCLUDE_DIRS include
 #  LIBRARIES poisson_stuff
-  CATKIN_DEPENDS tf rospy std_msgs message_runtime soma_geospatial_store 
+  CATKIN_DEPENDS tf rospy std_msgs message_runtime soma_geospatial_store actionlib actionlib_msgs mongodb_store
 #  DEPENDS system_lib
 )
 
