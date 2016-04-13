@@ -36,6 +36,9 @@ class TrajectoryOccurrenceFrequencies(object):
         self.minute_interval = minute_interval
         self.window_interval = window_interval
         self.ms = MessageStoreProxy(collection="occurrence_rates")
+        self.reinit()
+
+    def reinit(self):
         self.tof = dict()
 
     def load_tof(self):

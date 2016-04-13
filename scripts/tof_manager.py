@@ -43,8 +43,10 @@ class TrajectoryOccurrenceRateManager(object):
 
     def execute(self, goal):
         temp_start_time = rospy.Time.now()
-        curr_date = datetime.date.fromtimestamp(rospy.Time.now().secs)
-        # curr_date = datetime.date(2016, 3, 9)
+        curr_date = datetime.datetime.fromtimestamp(rospy.Time.now().secs)
+        # curr_date = datetime.datetime(2016, 3, 10, 0, 50)
+        if curr_date.hour >= 0 and curr_date.hour < 8:
+            curr_date = curr_date - datetime.timedelta(hours=24)
         curr_date = datetime.datetime(curr_date.year, curr_date.month, curr_date.day, 0, 0)
         prev_date = curr_date - datetime.timedelta(hours=24)
         self.rotm.calculate_region_observation_duration([prev_date, curr_date], self.minute_interval)
@@ -67,6 +69,8 @@ class TrajectoryOccurrenceRateManager(object):
 
         self.tof.update_tof_daily(curr_traj_est, prev_traj_est, curr_date)
         self.tof.store_tof()
+        self.rotm.reinit()
+        self.tof.reinit()
         temp_end_time = rospy.Time.now()
         rospy.loginfo("Time needed to complete this is %d" % (temp_end_time - temp_start_time).secs)
         self._as.set_succeeded(OccurrenceRateLearningResult())
@@ -87,9 +91,12 @@ class TrajectoryOccurrenceRateManager(object):
             counter += 1
         if counter == 0:
             counter += 1
-        rospy.loginfo(
-            "Occurrence Rate is obtained, which has value %.2f" % (occurrence_rate / float(counter))
-        )
+        if len(logs) > 0:
+            rospy.loginfo(
+                "Occurrence Rate is obtained, which has value %.2f" % (occurrence_rate / float(counter))
+            )
+        else:
+            rospy.loginfo("No occurrence rate is obtained, returning zero value")
         return TrajectoryOccurrenceRateResponse(occurrence_rate / float(counter))
 
 

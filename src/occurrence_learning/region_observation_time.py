@@ -26,6 +26,9 @@ class RegionObservationTimeManager(object):
             rospy.get_param("mongodb_host", "localhost"),
             rospy.get_param("mongodb_port", 62345)
         ).roslog.robot_pose
+        self.reinit()
+
+    def reinit(self):
         self.region_observation_duration = dict()
         self._month_year_observation_taken = dict()
 
