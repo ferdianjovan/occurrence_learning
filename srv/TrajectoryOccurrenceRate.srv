@@ -1,0 +1,6 @@
+string region_id    # soma region id
+int32 day           # day within a week (Monday = 0, Sunday = 6)
+int32 hour          # hour within a day (0 - 23)
+int32 minute        # minute within hour (0 - 59)
+---
+float32 occurrence_rate
